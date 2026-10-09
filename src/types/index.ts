@@ -36,7 +36,7 @@ export interface Task {
   reminder_enabled: boolean;
   reminder_minutes: number;
   custom_reminder_at?: string | null;
-  repeat_type: RepeatType | string;
+  repeat_type: RepeatType;
   notes?: string;
   created_at: string;
   updated_at: string;

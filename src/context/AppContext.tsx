@@ -320,14 +320,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
         };
         setUser(guestUser);
-        setTasks(INITIAL_TASKS.map(t => ({
-          ...t,
-          task_date: t.date || '2026-10-02',
-          task_time: t.time || '10:00 AM',
-          user_id: guestUser.id,
-          reminder_enabled: true,
-          reminder_minutes: 10,
-        })));
+        setTasks(INITIAL_TASKS.map(t => ({ ...t, user_id: guestUser.id })));
       }
       return;
     }

@@ -107,7 +107,7 @@ export const LockScreenSimulator: React.FC = () => {
                   {todayTasks.slice(0, 5).map((t, idx) => (
                     <div key={idx} className="flex items-center space-x-1.5">
                       <span className="text-slate-400">•</span>
-                      <span className="font-semibold text-slate-600">{t.time.replace(':00', '').replace(' AM', '').replace(' PM', '')}:00</span>
+                      <span className="font-semibold text-slate-600">{(t.time || t.task_time.substring(0, 5)).replace(':00', '').replace(' AM', '').replace(' PM', '')}:00</span>
                       <span>—</span>
                       <span className="truncate">{t.title}</span>
                     </div>

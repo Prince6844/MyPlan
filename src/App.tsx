@@ -34,24 +34,20 @@ const MainScreenRouter: React.FC = () => {
       const currentHours = now.getHours();
       const currentMinutes = now.getMinutes();
 
-      // Convert "07:00 AM" to 24h
-      const parseTimeTo24h = (timeStr: string) => {
-        const [time, period] = timeStr.split(' ');
-        let [h, m] = time.split(':').map(Number);
-        if (period === 'PM' && h < 12) h += 12;
-        if (period === 'AM' && h === 12) h = 0;
+      const parseTime = (timeStr: string) => {
+        const [h, m] = timeStr.split(':').map(Number);
         return { h, m };
       };
 
-      if (settings.morning_notification_enabled) {
-        const morning = parseTimeTo24h(settings.morning_notification_time);
+      if (settings.morning_summary_enabled) {
+        const morning = parseTime(settings.morning_summary_time);
         if (currentHours === morning.h && currentMinutes === morning.m) {
           testMorningNotification();
         }
       }
 
-      if (settings.night_notification_enabled) {
-        const night = parseTimeTo24h(settings.night_notification_time);
+      if (settings.night_review_enabled) {
+        const night = parseTime(settings.night_review_time);
         if (currentHours === night.h && currentMinutes === night.m) {
           testNightNotification();
         }

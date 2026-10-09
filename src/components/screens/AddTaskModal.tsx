@@ -14,6 +14,15 @@ import type { ReminderType, RepeatType } from '../../types';
 
 export const AddTaskModal: React.FC = () => {
   const { setActiveScreen, activeDate, categories, addTask, settings } = useApp();
+  const reminderTypeByMinutes: Record<number, ReminderType> = {
+    0: 'at_time',
+    5: '5_min',
+    10: '10_min',
+    15: '15_min',
+    30: '30_min',
+    60: '1_hour',
+  };
+  const defaultReminder = reminderTypeByMinutes[settings.default_reminder_minutes] || '10_min';
 
   // Form states
   const [title, setTitle] = useState('');
@@ -21,7 +30,7 @@ export const AddTaskModal: React.FC = () => {
   const [date, setDate] = useState(activeDate);
   const [time, setTime] = useState('10:00 AM');
   const [repeat, setRepeat] = useState<RepeatType>('none');
-  const [reminder, setReminder] = useState<ReminderType>(settings.default_reminder || '10_min');
+  const [reminder, setReminder] = useState<ReminderType>(defaultReminder);
   const [category, setCategory] = useState(categories[0]?.name || 'Study');
   const [notes, setNotes] = useState('');
   const savingRef = useRef(false);

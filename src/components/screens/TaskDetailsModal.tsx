@@ -33,12 +33,12 @@ export const TaskDetailsModal: React.FC = () => {
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(task?.title || '');
-  const [editDate, setEditDate] = useState(task?.date || '');
-  const [editTime, setEditTime] = useState(task?.time || '');
+  const [editDate, setEditDate] = useState(task?.date || task?.task_date || '');
+  const [editTime, setEditTime] = useState(task?.time || task?.task_time.substring(0, 5) || '');
   const [editCategory, setEditCategory] = useState(task?.category || 'Study');
   const [editNotes, setEditNotes] = useState(task?.notes || '');
   const [editReminder, setEditReminder] = useState<ReminderType>(task?.reminder_type || '10_min');
-  const [editRepeat, setEditRepeat] = useState<RepeatType>(task?.repeat_type || 'none');
+  const [editRepeat, setEditRepeat] = useState<RepeatType>(task?.repeat_type ?? 'none');
 
   // Delete confirmation state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -95,6 +95,17 @@ export const TaskDetailsModal: React.FC = () => {
     };
     return map[type] || 'Does not repeat';
   };
+
+  const taskReminderType: ReminderType = task.reminder_type ?? (
+    !task.reminder_enabled ? 'none' : ({
+      0: 'at_time',
+      5: '5_min',
+      10: '10_min',
+      15: '15_min',
+      30: '30_min',
+      60: '1_hour',
+    } satisfies Record<number, ReminderType>)[task.reminder_minutes] || '10_min'
+  );
 
   const handleSaveEdit = async () => {
     await updateTask(task.id, {
@@ -189,7 +200,7 @@ export const TaskDetailsModal: React.FC = () => {
                   <span className="text-xs font-semibold">Date</span>
                 </div>
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                  {formatDateDisplay(task.date)}
+                  {formatDateDisplay(task.date || task.task_date)}
                 </span>
               </div>
 
@@ -200,7 +211,7 @@ export const TaskDetailsModal: React.FC = () => {
                   <span className="text-xs font-semibold">Time</span>
                 </div>
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                  {task.time}
+                  {task.time || task.task_time.substring(0, 5)}
                 </span>
               </div>
 
@@ -211,7 +222,7 @@ export const TaskDetailsModal: React.FC = () => {
                   <span className="text-xs font-semibold">Reminder</span>
                 </div>
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                  {getReminderLabel(task.reminder_type)}
+                  {getReminderLabel(taskReminderType)}
                 </span>
               </div>
 
