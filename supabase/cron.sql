@@ -1,6 +1,8 @@
 -- Run after enabling pg_cron, pg_net, and Vault in the Supabase project.
--- Create Vault secrets named "project_url" and "service_role_key" in the
--- Dashboard before scheduling; never put the service-role key in this file.
+-- Create Vault secrets named "project_url" (project URL, no trailing slash)
+-- and "service_role_key" in the Dashboard before scheduling. This secret must
+-- be the actual service-role JWT used by the processor's Authorization check;
+-- never put it in this file.
 
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net;

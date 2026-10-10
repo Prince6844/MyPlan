@@ -30,7 +30,7 @@ self.addEventListener('push', (event) => {
         icon: new URL('favicon.svg', baseUrl).href,
         badge: new URL('favicon.svg', baseUrl).href,
         data: payload.data || { url: baseUrl, type: payload.type || 'general' },
-        tag: payload.tag || payload.type || 'myplan-notification',
+        tag: payload.tag || payload.data?.deliveryKey || payload.type || 'myplan-notification',
       };
     } catch {
       data.body = event.data.text();

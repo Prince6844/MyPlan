@@ -125,7 +125,7 @@ serve(async req => {
           await webpush.sendNotification({
             endpoint: subscription.endpoint,
             keys: { p256dh: subscription.p256dh, auth: subscription.auth },
-          }, JSON.stringify({ title, body, type, data: { ...data, type } }));
+          }, JSON.stringify({ title, body, type, data: { ...data, deliveryKey: key, type } }));
           delivered++;
         } catch (error: unknown) {
           const statusCode = (error as { statusCode?: number }).statusCode;
@@ -174,38 +174,40 @@ serve(async req => {
         console.error(`Invalid timezone configured for user ${settings.user_id}:`, error);
         continue;
       }
-      const currentMinute = Number(nowParts.hour) * 60 + Number(nowParts.minute);
-
       const morningTime = (settings.morning_summary_time || "07:00").slice(0, 5);
-      const [morningHour, morningMinute] = morningTime.split(":").map(Number);
-      if (settings.morning_summary_enabled && currentMinute === morningHour * 60 + morningMinute) {
-        const scheduled = zonedDateTimeToEpoch(today, morningTime, timeZone);
-        if (scheduled !== null) {
-          const { data: tasks, error } = await supabase
-            .from("tasks").select("title, task_time").eq("user_id", settings.user_id)
-            .eq("task_date", today).order("task_time", { ascending: true });
-          if (error) throw error;
-          const lines = (tasks || []).slice(0, 5).map(task => `${String(task.task_time).slice(0, 5)} ${task.title}`);
-          const message = tasks?.length
-            ? `You have ${tasks.length} task${tasks.length === 1 ? "" : "s"} today.\n${lines.join("\n")}`
-            : "You have no tasks planned for today.";
-          if (await dispatch(settings.user_id, "morning_summary", `morning:${today}`, scheduled, "Your MyPlan morning summary", message, { date: today, url: selfBaseUrl() })) sentMorning++;
-        }
+      const morningScheduled = zonedDateTimeToEpoch(today, morningTime, timeZone);
+      if (
+        settings.morning_summary_enabled &&
+        morningScheduled !== null &&
+        now.getTime() >= morningScheduled &&
+        now.getTime() - morningScheduled <= deliveryWindow
+      ) {
+        const { data: tasks, error } = await supabase
+          .from("tasks").select("title, task_time").eq("user_id", settings.user_id)
+          .eq("task_date", today).order("task_time", { ascending: true });
+        if (error) throw error;
+        const lines = (tasks || []).slice(0, 5).map(task => `${String(task.task_time).slice(0, 5)} ${task.title}`);
+        const message = tasks?.length
+          ? `You have ${tasks.length} task${tasks.length === 1 ? "" : "s"} today.\n${lines.join("\n")}`
+          : "You have no tasks planned for today.";
+        if (await dispatch(settings.user_id, "morning_summary", `morning:${today}`, morningScheduled, "Your MyPlan morning summary", message, { date: today, url: selfBaseUrl() })) sentMorning++;
       }
 
       const nightTime = (settings.night_review_time || "22:00").slice(0, 5);
-      const [nightHour, nightMinute] = nightTime.split(":").map(Number);
-      if (settings.night_review_enabled && currentMinute === nightHour * 60 + nightMinute) {
-        const scheduled = zonedDateTimeToEpoch(today, nightTime, timeZone);
-        if (scheduled !== null) {
-          const { data: pending, error } = await supabase
-            .from("tasks").select("title").eq("user_id", settings.user_id)
-            .eq("task_date", today).eq("completed", false);
-          if (error) throw error;
-          const names = (pending || []).slice(0, 4).map(task => task.title).join(", ");
-          const message = pending?.length ? `${pending.length} task${pending.length === 1 ? "" : "s"} still need attention: ${names}` : "You completed everything planned for today. Great work!";
-          if (await dispatch(settings.user_id, "night_review", `night:${today}`, scheduled, "Your MyPlan evening review", message, { date: today })) sentNight++;
-        }
+      const nightScheduled = zonedDateTimeToEpoch(today, nightTime, timeZone);
+      if (
+        settings.night_review_enabled &&
+        nightScheduled !== null &&
+        now.getTime() >= nightScheduled &&
+        now.getTime() - nightScheduled <= deliveryWindow
+      ) {
+        const { data: pending, error } = await supabase
+          .from("tasks").select("title").eq("user_id", settings.user_id)
+          .eq("task_date", today).eq("completed", false);
+        if (error) throw error;
+        const names = (pending || []).slice(0, 4).map(task => task.title).join(", ");
+        const message = pending?.length ? `${pending.length} task${pending.length === 1 ? "" : "s"} still need attention: ${names}` : "You completed everything planned for today. Great work!";
+        if (await dispatch(settings.user_id, "night_review", `night:${today}`, nightScheduled, "Your MyPlan evening review", message, { date: today })) sentNight++;
       }
 
       const rangeStart = shiftDate(today, -1);

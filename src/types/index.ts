@@ -117,4 +117,8 @@ export type ActiveScreen =
 export type NotificationPermissionState = 
   | 'Notifications not enabled'
   | 'Notifications enabled'
-  | 'Notifications blocked';
+  | 'Notifications blocked'
+  | 'Notifications unsupported'
+  | 'Notifications require a secure connection';
+
+export type PushSubscriptionState = 'checking' | 'subscribed' | 'not_subscribed' | 'needs_sign_in' | 'error' | 'worker_error' | 'unsupported';

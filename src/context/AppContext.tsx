@@ -6,7 +6,8 @@ import type {
   UserSettings, 
   UserProfile, 
   ActiveScreen, 
-  NotificationPermissionState 
+  NotificationPermissionState,
+  PushSubscriptionState,
 } from '../types';
 import { DEFAULT_CATEGORIES, INITIAL_TASKS } from '../lib/constants';
 import { soundService } from '../lib/sound';
@@ -21,6 +22,7 @@ import {
 } from '../lib/supabase';
 import { 
   getNotificationPermissionStatus, 
+  getPushSubscriptionState,
   subscribeUserToPush, 
   sendPushViaEdgeFunction, 
   registerServiceWorker 
@@ -40,6 +42,9 @@ interface AppContextType {
   currentNotification: InAppNotification | null;
   toastMessage: { text: string; type: 'success' | 'error' | 'info' } | null;
   permissionStatus: NotificationPermissionState;
+  pushSubscriptionStatus: PushSubscriptionState;
+  notificationStatusMessage: string | null;
+  refreshNotificationStatus: () => Promise<void>;
 
   // Navigation
   setActiveScreen: (screen: ActiveScreen) => void;
@@ -144,6 +149,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentNotification, setCurrentNotification] = useState<InAppNotification | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermissionState>(getNotificationPermissionStatus);
+  const [pushSubscriptionStatus, setPushSubscriptionStatus] = useState<PushSubscriptionState>('checking');
+  const [notificationStatusMessage, setNotificationStatusMessage] = useState<string | null>(null);
 
   // Toast feedback helper
   const showToast = useCallback((text: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -167,11 +174,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [settings.dark_mode]);
 
-  // Register service worker on app startup
+  const refreshNotificationStatus = useCallback(async () => {
+    const status = getNotificationPermissionStatus();
+    setPermissionStatus(status);
+    if (status === 'Notifications unsupported' || status === 'Notifications require a secure connection') {
+      setPushSubscriptionStatus('unsupported');
+      setNotificationStatusMessage(null);
+      return;
+    }
+    try {
+      const registration = await registerServiceWorker();
+      const expectedScope = new URL(import.meta.env.BASE_URL, window.location.origin).href;
+      if (registration.scope !== expectedScope) throw new Error(`Expected service-worker scope ${expectedScope}, got ${registration.scope}.`);
+      setPushSubscriptionStatus(await getPushSubscriptionState(user?.id ?? null));
+      setNotificationStatusMessage(null);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Could not register the MyPlan notification worker:', error);
+      setPushSubscriptionStatus('worker_error');
+      setNotificationStatusMessage(message);
+    }
+  }, [user?.id]);
+
   useEffect(() => {
-    registerServiceWorker();
-    setPermissionStatus(getNotificationPermissionStatus());
-  }, []);
+    void refreshNotificationStatus();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void refreshNotificationStatus();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [refreshNotificationStatus]);
 
   // Check query params on mount for notification click navigation
   useEffect(() => {
@@ -625,13 +657,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const result = await subscribeUserToPush(user.id);
-    setPermissionStatus(getNotificationPermissionStatus());
+    await refreshNotificationStatus();
 
     if (result.success) {
       setSettings(prev => ({ ...prev, notifications_enabled: true }));
       showToast(result.message, 'success');
       return true;
     } else {
+      setPermissionStatus(getNotificationPermissionStatus());
       showToast(result.message, 'error');
       return false;
     }
@@ -644,7 +677,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    showToast('Dispatching push notification...', 'info');
+    showToast('Sending a test through the Supabase Push Edge Function…', 'info');
 
     const result = await sendPushViaEdgeFunction(user.id, {
       title: 'MyPlan 🔔',
@@ -895,6 +928,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentNotification,
         toastMessage,
         permissionStatus,
+        pushSubscriptionStatus,
+        notificationStatusMessage,
+        refreshNotificationStatus,
 
         setActiveScreen,
         setActiveDate,

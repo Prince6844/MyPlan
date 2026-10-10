@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { 
   Bell, 
+  CircleAlert,
+  CircleCheck,
+  CircleHelp,
   Moon, 
   Volume2, 
   Globe, 
@@ -10,7 +13,6 @@ import {
   Check,
   Send,
   Clock,
-  Sparkles
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { AuthModal } from './AuthModal';
@@ -22,13 +24,18 @@ export const SettingsScreen: React.FC = () => {
     setActiveScreen, 
     enablePushNotifications, 
     sendTestPush, 
-    permissionStatus 
+    permissionStatus,
+    pushSubscriptionStatus,
+    notificationStatusMessage,
+    refreshNotificationStatus,
+    user,
   } = useApp();
 
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [editingTarget, setEditingTarget] = useState<'morning' | 'night' | 'reminder' | 'timezone' | null>(null);
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
+  const [isRefreshingNotifications, setIsRefreshingNotifications] = useState(false);
 
   const reminderOptions = [
     { label: 'At time of task', minutes: 0 },
@@ -53,37 +60,58 @@ export const SettingsScreen: React.FC = () => {
 
   const handleEnablePush = async () => {
     setIsSubscribing(true);
-    await enablePushNotifications();
-    setIsSubscribing(false);
+    try {
+      await enablePushNotifications();
+    } finally {
+      setIsSubscribing(false);
+    }
   };
 
   const handleSendTestPush = async () => {
     setIsSendingTest(true);
-    await sendTestPush();
-    setIsSendingTest(false);
+    try {
+      await sendTestPush();
+    } finally {
+      setIsSendingTest(false);
+    }
+  };
+
+  const handleRefreshNotificationStatus = async () => {
+    setIsRefreshingNotifications(true);
+    try {
+      await refreshNotificationStatus();
+    } finally {
+      setIsRefreshingNotifications(false);
+    }
   };
 
   const getStatusBadge = () => {
-    switch (permissionStatus) {
-      case 'Notifications enabled':
+    if (pushSubscriptionStatus === 'subscribed' && permissionStatus === 'Notifications enabled') {
         return (
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-            ● Notifications enabled
-          </span>
-        );
-      case 'Notifications blocked':
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
-            ✕ Notifications blocked
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-            ○ Notifications not enabled
+            ● This device is subscribed
           </span>
         );
     }
+    if (permissionStatus === 'Notifications blocked') {
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+            ● Permission blocked
+          </span>
+        );
+    }
+    if (pushSubscriptionStatus === 'worker_error' || pushSubscriptionStatus === 'error') {
+      return (
+        <span className="inline-flex items-center rounded-full border border-rose-300 bg-rose-100 px-2.5 py-0.5 text-[11px] font-bold text-rose-700 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
+          Setup error
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-700 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+        {pushSubscriptionStatus === 'checking' ? 'Checking subscription…' : 'Not subscribed'}
+      </span>
+    );
   };
 
   return (
@@ -104,27 +132,74 @@ export const SettingsScreen: React.FC = () => {
             {getStatusBadge()}
           </div>
 
-          {/* Enable Notifications Call to Action Button */}
-          {(!settings.notifications_enabled || permissionStatus !== 'Notifications enabled') && (
-            <div className="mb-3 p-4 rounded-3xl bg-gradient-to-r from-blue-500 to-brand-600 text-white shadow-float flex flex-col items-start space-y-2">
-              <div className="flex items-center space-x-2">
-                <Sparkles size={16} className="text-amber-300" />
-                <h3 className="text-xs font-extrabold uppercase tracking-wide">Stay Updated</h3>
+          <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">Push notifications</h3>
+                <p className="mt-1 text-xs text-slate-500">Permission: {permissionStatus}. Subscription: {
+                  pushSubscriptionStatus === 'subscribed' ? 'saved for this account and device' :
+                  pushSubscriptionStatus === 'needs_sign_in' ? 'sign in to your Supabase account' :
+                  pushSubscriptionStatus === 'checking' ? 'checking…' :
+                  pushSubscriptionStatus === 'unsupported' ? 'not supported by this browser' :
+                  pushSubscriptionStatus === 'worker_error' ? 'service worker setup failed' :
+                  pushSubscriptionStatus === 'error' ? 'could not be verified' : 'not active'
+                }.</p>
               </div>
-              <p className="text-xs text-blue-100 leading-snug">
-                Subscribe this device for scheduled task reminders, morning summaries, and evening reviews. Delivery requires browser support and a configured Supabase scheduler.
-              </p>
               <button
-                onClick={handleEnablePush}
-                disabled={isSubscribing}
-                className="mt-1 w-full py-2.5 rounded-2xl bg-white text-brand-600 font-extrabold text-xs shadow-md hover:bg-blue-50 transition-colors disabled:opacity-60"
-              >
-                {isSubscribing ? 'Subscribing device…' : 'Enable Notifications'}
-              </button>
+                type="button"
+                onClick={handleRefreshNotificationStatus}
+                disabled={isRefreshingNotifications}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+              >{isRefreshingNotifications ? 'Checking…' : 'Check status'}</button>
             </div>
-          )}
 
-          <div className="bg-white dark:bg-slate-800/90 rounded-3xl p-1.5 shadow-sm border border-slate-100 dark:border-slate-700/60 divide-y divide-slate-100 dark:divide-slate-700/50">
+            {permissionStatus === 'Notifications blocked' && (
+              <div role="alert" className="mt-3 flex gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+                <CircleAlert size={16} className="mt-0.5 shrink-0" />
+                <p>Browser permission is blocked. In Chrome, use the site controls icon beside the address → <strong>Site settings</strong> → <strong>Notifications</strong> → <strong>Allow</strong>, then reload this page. In other browsers, open site permissions for prince6844.github.io and allow notifications. MyPlan will not repeatedly prompt while permission is blocked.</p>
+              </div>
+            )}
+            {permissionStatus === 'Notifications unsupported' && (
+              <div role="status" className="mt-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                <CircleHelp size={16} className="shrink-0" />This browser or browsing mode does not provide the required Notifications, Push, and Service Worker APIs. Try a supported, non-private browser window.
+              </div>
+            )}
+            {permissionStatus === 'Notifications require a secure connection' && (
+              <div role="alert" className="mt-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                <CircleAlert size={16} className="shrink-0" />Push notifications require HTTPS. Open <strong>https://prince6844.github.io/MyPlan/</strong>.
+              </div>
+            )}
+            {pushSubscriptionStatus === 'subscribed' && permissionStatus === 'Notifications enabled' && (
+              <p className="mt-3 flex items-center gap-2 text-xs text-emerald-700"><CircleCheck size={15} />Browser permission is granted and this device subscription is saved in Supabase.</p>
+            )}
+            {pushSubscriptionStatus === 'error' && (
+              <p role="alert" className="mt-3 text-xs text-rose-700">Could not verify the saved subscription. Check your sign-in and Supabase `push_subscriptions` access, then select Check status.</p>
+            )}
+            {pushSubscriptionStatus === 'worker_error' && (
+              <p role="alert" className="mt-3 text-xs text-rose-700">The MyPlan service worker could not be registered. Verify that <code>/MyPlan/sw.js</code> is deployed and refresh status. {notificationStatusMessage}</p>
+            )}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {pushSubscriptionStatus !== 'subscribed' && (
+                <button
+                  type="button"
+                  onClick={handleEnablePush}
+                  disabled={isSubscribing || pushSubscriptionStatus === 'checking' || pushSubscriptionStatus === 'unsupported' || pushSubscriptionStatus === 'needs_sign_in' || permissionStatus === 'Notifications require a secure connection'}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                ><Bell size={16} />{isSubscribing ? 'Enabling…' : 'Enable Notifications'}</button>
+              )}
+              <button
+                type="button"
+                onClick={handleSendTestPush}
+                disabled={isSendingTest || !user || pushSubscriptionStatus !== 'subscribed' || permissionStatus !== 'Notifications enabled'}
+                className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+              ><Send size={15} />{isSendingTest ? 'Sending test…' : 'Send Test Notification'}</button>
+              {(!user || pushSubscriptionStatus === 'needs_sign_in') && <button type="button" onClick={() => setShowAuthModal(true)} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">Sign in to Supabase</button>}
+            </div>
+            <p className="mt-3 text-xs leading-relaxed text-slate-500">Background delivery has not been verified until a test notification arrives after all MyPlan tabs are closed. A successful test means the push provider accepted the request; it does not prove the device displayed it. Scheduled notifications also require deployed Supabase Edge Functions, VAPID secrets, the database migration, and Cron job documented in the project setup.</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm divide-y divide-slate-100 dark:divide-slate-700/50">
             {/* Morning Summary */}
             <div className="flex items-center justify-between p-3.5 px-3">
               <div 
@@ -215,17 +290,6 @@ export const SettingsScreen: React.FC = () => {
               <ChevronRight size={18} className="text-slate-300 dark:text-slate-600" />
             </div>
 
-            {/* Send Test Notification Button */}
-            <div className="p-3.5 px-3">
-              <button
-                onClick={handleSendTestPush}
-                disabled={isSendingTest}
-                className="w-full py-2.5 px-4 rounded-2xl bg-brand-50 hover:bg-brand-100 dark:bg-brand-950/40 dark:hover:bg-brand-900/50 text-brand-600 dark:text-brand-300 border border-brand-200/80 dark:border-brand-800/60 font-bold text-xs flex items-center justify-center space-x-2 transition-all disabled:opacity-50"
-              >
-                <Send size={14} className={isSendingTest ? 'animate-pulse' : ''} />
-                <span>{isSendingTest ? 'Sending Real Push...' : 'Send Test Notification'}</span>
-              </button>
-            </div>
           </div>
         </div>
 

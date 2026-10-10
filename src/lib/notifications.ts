@@ -25,11 +25,19 @@ export class NotificationManager {
 
   async requestPermission(): Promise<NotificationPermission> {
     if (!this.isSupported()) return 'denied';
+    if (!window.isSecureContext) {
+      throw new Error('Notifications require a secure HTTPS connection.');
+    }
+    if (Notification.permission === 'denied') {
+      throw new Error('Notifications are blocked for this site. Allow them in browser site settings, then reload MyPlan.');
+    }
+    if (Notification.permission === 'granted') return 'granted';
     try {
       const permission = await Notification.requestPermission();
       return permission;
-    } catch {
-      return 'denied';
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`The browser could not request notification permission: ${message}`);
     }
   }
 
@@ -63,8 +71,8 @@ export class NotificationManager {
       try {
         new Notification(item.title, {
           body: item.body,
-          icon: '/favicon.svg',
-          badge: '/favicon.svg',
+          icon: `${import.meta.env.BASE_URL}favicon.svg`,
+          badge: `${import.meta.env.BASE_URL}favicon.svg`,
         });
       } catch (err) {
         console.warn('Native notification failed:', err);
