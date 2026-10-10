@@ -102,6 +102,8 @@ export type ActiveScreen =
   | 'onboarding'
   | 'auth'
   | 'home'
+  | 'tasks'
+  | 'completed'
   | 'calendar'
   | 'stats'
   | 'settings'

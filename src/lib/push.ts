@@ -30,8 +30,9 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
   }
 
   try {
-    const registration = await navigator.serviceWorker.register('/sw.js', {
-      scope: '/',
+    const baseUrl = import.meta.env.BASE_URL;
+    const registration = await navigator.serviceWorker.register(`${baseUrl}sw.js`, {
+      scope: baseUrl,
     });
     await navigator.serviceWorker.ready;
     return registration;
@@ -66,6 +67,11 @@ export async function subscribeUserToPush(userId: string): Promise<{ success: bo
   }
 
   try {
+    const supabase = getSupabase();
+    if (!supabase) {
+      return { success: false, message: 'Sign in to a configured Supabase project before enabling push notifications.' };
+    }
+
     // 1. Explicit permission request
     const permission = await Notification.requestPermission();
     if (permission === 'denied') {
@@ -126,35 +132,35 @@ export async function subscribeUserToPush(userId: string): Promise<{ success: bo
       .replace(/=+$/, '');
 
     // 4. Save to Supabase push_subscriptions table
-    const supabase = getSupabase();
-    if (supabase) {
-      const { error } = await supabase
-        .from('push_subscriptions')
-        .upsert(
-          {
-            user_id: userId,
-            endpoint: subscription.endpoint,
-            p256dh,
-            auth,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'user_id,endpoint' }
-        );
+    const { error: subscriptionError } = await supabase
+      .from('push_subscriptions')
+      .upsert(
+        {
+          user_id: userId,
+          endpoint: subscription.endpoint,
+          p256dh,
+          auth,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,endpoint' }
+      );
 
-      if (error) {
-        console.warn('Could not save push subscription to Supabase:', error.message);
-      } else {
-        // Also update user_settings notifications_enabled = true
-        await supabase
-          .from('user_settings')
-          .update({ notifications_enabled: true })
-          .eq('user_id', userId);
-      }
+    if (subscriptionError) {
+      console.error('Could not save push subscription to Supabase:', subscriptionError.message);
+      return { success: false, message: `Could not save this device subscription: ${subscriptionError.message}` };
+    }
+
+    const { error: settingsError } = await supabase
+      .from('user_settings')
+      .upsert({ user_id: userId, notifications_enabled: true }, { onConflict: 'user_id' });
+    if (settingsError) {
+      console.error('Could not update notification settings:', settingsError.message);
+      return { success: false, message: `Subscription saved, but notification settings could not be enabled: ${settingsError.message}` };
     }
 
     return {
       success: true,
-      message: 'Push notifications enabled successfully on this device!',
+      message: 'This device is subscribed for push notifications.',
       subscription,
     };
   } catch (err: unknown) {
@@ -193,51 +199,13 @@ export async function sendPushViaEdgeFunction(
       },
     });
 
-    if (error) {
-      console.warn('Edge function error:', error);
-      // Fallback: If edge function is not deployed yet or local mode, show local persistent notification via SW
-      if ('serviceWorker' in navigator && Notification.permission === 'granted') {
-        const reg = await navigator.serviceWorker.ready;
-        await reg.showNotification(payload.title, {
-          body: payload.body,
-          icon: '/favicon.svg',
-          badge: '/favicon.svg',
-          data: payload.data,
-          tag: payload.notification_type,
-        });
-        return {
-          success: true,
-          message: 'Notification delivered via Service Worker (Edge Function returned error, fallback activated).',
-        };
-      }
-      return { success: false, message: error.message };
+    if (error) return { success: false, message: error.message };
+    if (data?.success !== true || typeof data?.delivered !== 'number' || data.delivered < 1) {
+      return { success: false, message: data?.message || 'The server did not confirm delivery to any device.' };
     }
-
-    return {
-      success: true,
-      message: data?.message || 'Push notification sent to registered device(s)!',
-    };
+    return { success: true, message: data.message || `Push accepted for ${data.delivered} device(s).` };
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    // Fallback directly to Service Worker notification if Edge Function is offline
-    if ('serviceWorker' in navigator && Notification.permission === 'granted') {
-      try {
-        const reg = await navigator.serviceWorker.ready;
-        await reg.showNotification(payload.title, {
-          body: payload.body,
-          icon: '/favicon.svg',
-          badge: '/favicon.svg',
-          data: payload.data,
-          tag: payload.notification_type,
-        });
-        return {
-          success: true,
-          message: 'Notification displayed on device via Service Worker.',
-        };
-      } catch (swErr) {
-        console.error(swErr);
-      }
-    }
     return { success: false, message: errorMsg };
   }
 }

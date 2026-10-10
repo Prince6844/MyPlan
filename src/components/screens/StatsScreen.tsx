@@ -6,8 +6,6 @@ import {
   PieChart as PieIcon,
   Flame
 } from 'lucide-react';
-import { TopBar } from '../common/TopBar';
-import { BottomNavigation } from '../layout/BottomNavigation';
 import { useApp } from '../../context/AppContext';
 
 export const StatsScreen: React.FC = () => {
@@ -24,10 +22,9 @@ export const StatsScreen: React.FC = () => {
   }).filter(c => c.total > 0);
 
   return (
-    <div className="relative w-full h-full min-h-[640px] flex flex-col justify-between bg-[#F8FAFC] dark:bg-slate-900 text-slate-800 dark:text-slate-100 animate-fade-in overflow-hidden select-none">
-      <TopBar />
+    <section className="mx-auto max-w-5xl space-y-5 animate-fade-in text-slate-800">
 
-      <div className="flex-1 overflow-y-auto px-5 pt-2 pb-6 space-y-4 no-scrollbar">
+      <div className="space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between pt-1">
           <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
@@ -35,7 +32,7 @@ export const StatsScreen: React.FC = () => {
           </h1>
           <div className="flex items-center space-x-1 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 text-xs font-bold border border-amber-200/60 dark:border-amber-800/40">
             <Flame size={14} className="fill-amber-500 text-amber-500" />
-            <span>4 Day Streak!</span>
+            <span>{weekly.completedThisWeek} completed this week</span>
           </div>
         </div>
 
@@ -176,7 +173,6 @@ export const StatsScreen: React.FC = () => {
         </div>
       </div>
 
-      <BottomNavigation />
-    </div>
+    </section>
   );
 };

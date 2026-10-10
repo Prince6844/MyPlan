@@ -2,15 +2,15 @@
   "name": "MyPlan — Daily Productivity & Reminders",
   "short_name": "MyPlan",
   "description": "Plan today. Build a better tomorrow. Real-time tasks, morning digest, and night reviews.",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#F8FAFC",
   "theme_color": "#1479F5",
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/favicon.svg",
-      "sizes": "192x192 512x512",
+      "src": "./favicon.svg",
+      "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     }

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { MobileFrame } from './components/common/MobileFrame';
 import { Toast } from './components/common/Toast';
@@ -18,45 +18,7 @@ import { LockScreenSimulator } from './components/screens/LockScreenSimulator';
 import { StatsScreen } from './components/screens/StatsScreen';
 
 const MainScreenRouter: React.FC = () => {
-  const { 
-    activeScreen, 
-    settings, 
-    tasks, 
-    activeDate, 
-    testMorningNotification, 
-    testNightNotification 
-  } = useApp();
-
-  // Background timer to check morning and night review times
-  useEffect(() => {
-    const checkScheduledTimes = () => {
-      const now = new Date();
-      const currentHours = now.getHours();
-      const currentMinutes = now.getMinutes();
-
-      const parseTime = (timeStr: string) => {
-        const [h, m] = timeStr.split(':').map(Number);
-        return { h, m };
-      };
-
-      if (settings.morning_summary_enabled) {
-        const morning = parseTime(settings.morning_summary_time);
-        if (currentHours === morning.h && currentMinutes === morning.m) {
-          testMorningNotification();
-        }
-      }
-
-      if (settings.night_review_enabled) {
-        const night = parseTime(settings.night_review_time);
-        if (currentHours === night.h && currentMinutes === night.m) {
-          testNightNotification();
-        }
-      }
-    };
-
-    const interval = setInterval(checkScheduledTimes, 60000); // check every minute
-    return () => clearInterval(interval);
-  }, [settings, tasks, activeDate, testMorningNotification, testNightNotification]);
+  const { activeScreen } = useApp();
 
   // Screen selection
   const renderScreen = () => {
@@ -66,7 +28,11 @@ const MainScreenRouter: React.FC = () => {
       case 'onboarding':
         return <OnboardingScreen />;
       case 'home':
-        return <HomeScreen />;
+        return <HomeScreen view="dashboard" />;
+      case 'tasks':
+        return <HomeScreen view="tasks" />;
+      case 'completed':
+        return <HomeScreen view="completed" />;
       case 'add_task':
         return <AddTaskModal />;
       case 'calendar':
@@ -84,7 +50,7 @@ const MainScreenRouter: React.FC = () => {
       case 'stats':
         return <StatsScreen />;
       default:
-        return <HomeScreen />;
+        return <HomeScreen view="dashboard" />;
     }
   };
 

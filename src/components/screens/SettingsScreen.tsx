@@ -12,8 +12,6 @@ import {
   Clock,
   Sparkles
 } from 'lucide-react';
-import { TopBar } from '../common/TopBar';
-import { BottomNavigation } from '../layout/BottomNavigation';
 import { useApp } from '../../context/AppContext';
 import { AuthModal } from './AuthModal';
 
@@ -89,10 +87,9 @@ export const SettingsScreen: React.FC = () => {
   };
 
   return (
-    <div className="relative w-full h-full min-h-[640px] flex flex-col justify-between bg-[#F8FAFC] dark:bg-slate-900 text-slate-800 dark:text-slate-100 animate-fade-in overflow-hidden select-none">
-      <TopBar />
+    <div className="mx-auto max-w-4xl space-y-6 animate-fade-in text-slate-800">
 
-      <div className="flex-1 overflow-y-auto px-5 pt-2 pb-6 space-y-5 no-scrollbar">
+      <div className="space-y-5">
         {/* Header */}
         <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white pt-1">
           Settings
@@ -108,21 +105,21 @@ export const SettingsScreen: React.FC = () => {
           </div>
 
           {/* Enable Notifications Call to Action Button */}
-          {permissionStatus !== 'Notifications enabled' && (
+          {(!settings.notifications_enabled || permissionStatus !== 'Notifications enabled') && (
             <div className="mb-3 p-4 rounded-3xl bg-gradient-to-r from-blue-500 to-brand-600 text-white shadow-float flex flex-col items-start space-y-2">
               <div className="flex items-center space-x-2">
                 <Sparkles size={16} className="text-amber-300" />
                 <h3 className="text-xs font-extrabold uppercase tracking-wide">Stay Updated</h3>
               </div>
               <p className="text-xs text-blue-100 leading-snug">
-                Receive real lock-screen morning briefs, night reviews, and task reminders on this device.
+                Subscribe this device for scheduled task reminders, morning summaries, and evening reviews. Delivery requires browser support and a configured Supabase scheduler.
               </p>
               <button
                 onClick={handleEnablePush}
                 disabled={isSubscribing}
                 className="mt-1 w-full py-2.5 rounded-2xl bg-white text-brand-600 font-extrabold text-xs shadow-md hover:bg-blue-50 transition-colors disabled:opacity-60"
               >
-                {isSubscribing ? 'Subscribing Device...' : 'Enable Notifications'}
+                {isSubscribing ? 'Subscribing device…' : 'Enable Notifications'}
               </button>
             </div>
           )}
@@ -323,8 +320,6 @@ export const SettingsScreen: React.FC = () => {
           </div>
         </div>
       </div>
-
-      <BottomNavigation />
 
       {/* Editing Modal Sheets */}
       {editingTarget && (

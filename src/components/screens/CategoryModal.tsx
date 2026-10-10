@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { ChevronLeft, Plus, Edit2, Trash2 } from 'lucide-react';
-import { TopBar } from '../common/TopBar';
 import { useApp } from '../../context/AppContext';
 import type { Category } from '../../types';
 
@@ -67,8 +66,7 @@ export const CategoryModal: React.FC = () => {
   };
 
   return (
-    <div className="relative w-full h-full min-h-[640px] flex flex-col justify-between bg-[#F8FAFC] dark:bg-slate-900 text-slate-800 dark:text-slate-100 animate-slide-up overflow-hidden select-none">
-      <TopBar />
+    <div className="relative mx-auto max-w-3xl space-y-4 animate-slide-up text-slate-800">
 
       {/* Screen Header matching Screen 8 */}
       <div className="w-full flex items-center justify-between px-4 py-2 border-b border-slate-100 dark:border-slate-800">
@@ -91,7 +89,7 @@ export const CategoryModal: React.FC = () => {
       </div>
 
       {/* Category List */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2.5 no-scrollbar">
+      <div className="grid gap-3 sm:grid-cols-2">
         {categories.map((cat) => (
           <div
             key={cat.id}

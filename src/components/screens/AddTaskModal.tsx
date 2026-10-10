@@ -8,12 +8,12 @@ import {
   ChevronRight,
   Check
 } from 'lucide-react';
-import { TopBar } from '../common/TopBar';
 import { useApp } from '../../context/AppContext';
 import type { ReminderType, RepeatType } from '../../types';
+import { isValidTaskDate, normalizeTaskTime } from '../../lib/dates';
 
 export const AddTaskModal: React.FC = () => {
-  const { setActiveScreen, activeDate, categories, addTask, settings } = useApp();
+  const { setActiveScreen, activeDate, categories, addTask, settings, showToast } = useApp();
   const reminderTypeByMinutes: Record<number, ReminderType> = {
     0: 'at_time',
     5: '5_min',
@@ -33,6 +33,7 @@ export const AddTaskModal: React.FC = () => {
   const [reminder, setReminder] = useState<ReminderType>(defaultReminder);
   const [category, setCategory] = useState(categories[0]?.name || 'Study');
   const [notes, setNotes] = useState('');
+  const [customReminderAt, setCustomReminderAt] = useState('');
   const savingRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -80,7 +81,20 @@ export const AddTaskModal: React.FC = () => {
     // Prevent double-submit/double-click from creating duplicate tasks.
     if (savingRef.current) return;
     if (!title.trim()) {
-      alert('Please enter a task title');
+      showToast('Please enter a task title.', 'error');
+      return;
+    }
+    const normalizedTime = normalizeTaskTime(time);
+    if (!isValidTaskDate(date)) {
+      showToast('Choose a valid task date.', 'error');
+      return;
+    }
+    if (!/^\d{2}:\d{2}:\d{2}$/.test(normalizedTime)) {
+      showToast('Enter a valid task time.', 'error');
+      return;
+    }
+    if (reminder === 'custom' && !customReminderAt) {
+      showToast('Choose a date and time for the custom reminder.', 'error');
       return;
     }
 
@@ -114,11 +128,15 @@ export const AddTaskModal: React.FC = () => {
       reminder_enabled: isReminderEnabled,
       reminder_minutes: reminderMinutes,
       reminder_type: reminder,
+      custom_reminder_at: reminder === 'custom' ? new Date(customReminderAt).toISOString() : null,
       repeat_type: repeat,
         notes: notes.trim() || undefined,
       });
 
       setActiveScreen('home');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save the task.';
+      showToast(message, 'error');
     } finally {
       savingRef.current = false;
       setIsSaving(false);
@@ -126,8 +144,7 @@ export const AddTaskModal: React.FC = () => {
   };
 
   return (
-    <div className="relative w-full h-full min-h-[640px] flex flex-col justify-between bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 animate-slide-up overflow-hidden select-none">
-      <TopBar />
+    <div className="relative mx-auto max-h-[calc(100vh-110px)] max-w-3xl overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-800 shadow-sm animate-slide-up">
 
       {/* Screen Header */}
       <div className="w-full flex items-center justify-between px-4 py-2 border-b border-slate-100 dark:border-slate-800">
@@ -144,7 +161,7 @@ export const AddTaskModal: React.FC = () => {
       </div>
 
       {/* Form Content */}
-      <form onSubmit={handleSave} className="flex-1 overflow-y-auto px-5 py-4 space-y-4 no-scrollbar">
+      <form onSubmit={handleSave} className="space-y-4 px-5 py-4">
         {/* Task Title */}
         <div>
           <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -160,6 +177,19 @@ export const AddTaskModal: React.FC = () => {
             autoFocus
           />
         </div>
+
+        {reminder === 'custom' && (
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-bold text-slate-700">Custom reminder date and time</span>
+            <input
+              type="datetime-local"
+              value={customReminderAt}
+              onChange={event => setCustomReminderAt(event.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              required
+            />
+          </label>
+        )}
 
         {/* Description (Optional) */}
         <div>

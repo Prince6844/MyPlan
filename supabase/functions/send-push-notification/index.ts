@@ -1,8 +1,3 @@
-// ============================================================================
-// Supabase Edge Function: send-push-notification
-// Sends standard Web Push notifications to all registered devices of a user
-// ============================================================================
-
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 import webpush from "npm:web-push@3.6.7";
@@ -10,172 +5,127 @@ import webpush from "npm:web-push@3.6.7";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+const notificationTypes = new Set(["morning_summary", "night_review", "task_reminder", "test"]);
 
 serve(async (req: Request) => {
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-    const vapidPublicKey = Deno.env.get("VAPID_PUBLIC_KEY") || "BKftqAQCkGtveJJA8-xzMWDp0O4uXPUduaH9zbVeZcspyQiEm84gAt-mZ7IuZyXG_7i0TA3uSaps-vROxP8S8mU";
-    
-    
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const vapidPublicKey = Deno.env.get("VAPID_PUBLIC_KEY");
     const vapidPrivateKey = Deno.env.get("VAPID_PRIVATE_KEY");
-      if (!vapidPrivateKey) {
-         throw new Error("VAPID_PRIVATE_KEY is not configured");
-    }
-    
-    
-    const vapidSubject = Deno.env.get("VAPID_SUBJECT") || "mailto:admin@myplan.app";
-
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return new Response(JSON.stringify({ error: "Missing Supabase backend credentials" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!supabaseUrl || !serviceRoleKey || !vapidPublicKey || !vapidPrivateKey) {
+      throw new Error("SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, VAPID_PUBLIC_KEY, and VAPID_PRIVATE_KEY must be configured");
     }
 
-    // Configure VAPID details
-    webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
-
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Verify caller authentication
     const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Authentication required" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const token = authHeader.slice("Bearer ".length);
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+    const isServiceRole = token === serviceRoleKey;
     let callerUserId: string | null = null;
-    let isServiceRole = false;
-
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "");
-      if (token === supabaseServiceKey) {
-        isServiceRole = true;
-      } else {
-        const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
-        if (!authErr && user) {
-          callerUserId = user.id;
-        }
-      }
+    if (!isServiceRole) {
+      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+      if (!error && user) callerUserId = user.id;
     }
 
-    const { user_id, title, body, notification_type = "test", data = {} } = await req.json();
-
-    if (!user_id || !title || !body) {
-      return new Response(JSON.stringify({ error: "Missing user_id, title, or body" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const body = await req.json();
+    const userId = body.user_id;
+    const title = body.title;
+    const message = body.body;
+    const type = body.notification_type ?? "test";
+    const data = body.data ?? {};
+    if (
+      typeof userId !== "string" || typeof title !== "string" || !title.trim() ||
+      typeof message !== "string" || !notificationTypes.has(type) ||
+      typeof data !== "object" || data === null || Array.isArray(data)
+    ) {
+      return new Response(JSON.stringify({ error: "Invalid notification payload" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!isServiceRole && callerUserId !== userId) {
+      return new Response(JSON.stringify({ error: "You can only notify your own account" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Security check: non-service callers can only send notifications to their own account
-    if (!isServiceRole && callerUserId !== user_id) {
-      return new Response(JSON.stringify({ error: "Unauthorized: You can only notify your own account" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Fetch all push subscriptions for this user
-    const { data: subscriptions, error: subErr } = await supabaseAdmin
+    webpush.setVapidDetails(
+      Deno.env.get("VAPID_SUBJECT") || "mailto:admin@myplan.app",
+      vapidPublicKey,
+      vapidPrivateKey,
+    );
+    const { data: subscriptions, error: subscriptionError } = await supabaseAdmin
       .from("push_subscriptions")
-      .select("*")
-      .eq("user_id", user_id);
+      .select("id, endpoint, p256dh, auth")
+      .eq("user_id", userId);
+    if (subscriptionError) throw subscriptionError;
 
-    if (subErr) {
-      throw subErr;
-    }
-
-    if (!subscriptions || subscriptions.length === 0) {
-      // Record in notification logs as pending/no_subscription
-      await supabaseAdmin.from("notification_logs").insert({
-        user_id,
-        notification_type,
-        title,
-        body,
-        status: "no_subscription",
+    if (!subscriptions?.length) {
+      const { error: logError } = await supabaseAdmin.from("notification_logs").insert({
+        user_id: userId, notification_type: type, title, body: message, status: "no_subscription",
       });
-
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          message: "No push subscriptions found for this user. Please enable notifications on your device." 
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      if (logError) console.error("Could not log missing push subscription:", logError.message);
+      return new Response(JSON.stringify({
+        success: false, delivered: 0, message: "No push subscriptions are registered for this account.",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const payload = JSON.stringify({
-      title,
-      body,
-      icon: "/favicon.svg",
-      badge: "/favicon.svg",
-      type: notification_type,
-      data,
-    });
-
-    let successCount = 0;
+    const payload = JSON.stringify({ title, body: message, type, data: { ...data, type } });
     const expiredIds: string[] = [];
+    let delivered = 0;
+    await Promise.all(subscriptions.map(async subscription => {
+      try {
+        await webpush.sendNotification({
+          endpoint: subscription.endpoint,
+          keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+        }, payload);
+        delivered++;
+      } catch (error: unknown) {
+        const statusCode = (error as { statusCode?: number }).statusCode;
+        console.error("Web Push delivery failed:", error);
+        if (statusCode === 404 || statusCode === 410) expiredIds.push(subscription.id);
+      }
+    }));
 
-    // Send push to each device subscription
-    await Promise.all(
-      subscriptions.map(async (sub) => {
-        try {
-          const pushSubscription = {
-            endpoint: sub.endpoint,
-            keys: {
-              p256dh: sub.p256dh,
-              auth: sub.auth,
-            },
-          };
-          await webpush.sendNotification(pushSubscription, payload);
-          successCount++;
-        } catch (err: unknown) {
-          const statusCode = (err as { statusCode?: number }).statusCode;
-          console.error(`Failed to push to endpoint ${sub.endpoint}:`, err);
-          // 404 or 410 indicates expired/unsubscribed endpoint
-          if (statusCode === 404 || statusCode === 410) {
-            expiredIds.push(sub.id);
-          }
-        }
-      })
-    );
-
-    // Prune expired or invalid subscriptions
-    if (expiredIds.length > 0) {
-      await supabaseAdmin
-        .from("push_subscriptions")
-        .delete()
-        .in("id", expiredIds);
+    if (expiredIds.length) {
+      const { error } = await supabaseAdmin.from("push_subscriptions").delete().in("id", expiredIds);
+      if (error) console.error("Could not remove expired push subscriptions:", error.message);
     }
-
-    // Log the notification
-    await supabaseAdmin.from("notification_logs").insert({
-      user_id,
-      notification_type,
+    const sentAt = delivered ? new Date().toISOString() : null;
+    const { error: logError } = await supabaseAdmin.from("notification_logs").insert({
+      user_id: userId,
+      notification_type: type,
       title,
-      body,
-      status: successCount > 0 ? "sent" : "failed",
-      sent_at: successCount > 0 ? new Date().toISOString() : null,
+      body: message,
+      status: delivered > 0 ? "sent" : "failed",
+      sent_at: sentAt,
     });
+    if (logError) console.error("Could not persist notification delivery log:", logError.message);
 
-    return new Response(
-      JSON.stringify({
-        success: successCount > 0,
-        message: `Notification dispatched to ${successCount} device(s)`,
-        delivered: successCount,
-        expired_pruned: expiredIds.length,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error("send-push-notification fatal error:", err);
-    return new Response(JSON.stringify({ error: errorMsg }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    return new Response(JSON.stringify({
+      success: delivered > 0,
+      message: delivered > 0 ? `Push accepted by ${delivered} device(s).` : "Push was not accepted by any registered device.",
+      delivered,
+      expired_pruned: expiredIds.length,
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("send-push-notification failed:", error);
+    return new Response(JSON.stringify({ success: false, error: message }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

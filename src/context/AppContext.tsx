@@ -25,6 +25,7 @@ import {
   sendPushViaEdgeFunction, 
   registerServiceWorker 
 } from '../lib/push';
+import { addDays, getDateInTimeZone, isValidTaskDate, normalizeTaskTime } from '../lib/dates';
 
 interface AppContextType {
   tasks: Task[];
@@ -102,7 +103,7 @@ const DEFAULT_SETTINGS: UserSettings = {
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeScreen, setActiveScreen] = useState<ActiveScreen>('splash');
-  const [activeDate, setActiveDate] = useState<string>('2026-10-02');
+  const [activeDate, setActiveDate] = useState<string>(() => getDateInTimeZone());
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   // Authentication State
@@ -217,81 +218,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     return unsub;
   }, []);
-
-  // Schedule task-specific reminders while the app is open.
-  // Timers are rebuilt whenever tasks/settings change, so edits and completion
-  // automatically cancel/reschedule the corresponding reminder.
-  useEffect(() => {
-    const timers = new Map<string, ReturnType<typeof setTimeout>>();
-    const MAX_TIMEOUT = 2147483647;
-
-    const parseTaskDateTime = (task: Task): number | null => {
-      const date = task.task_date || task.date;
-      const rawTime = (task.task_time || task.time || '').trim();
-      if (!date || !rawTime) return null;
-
-      let hours = 0;
-      let minutes = 0;
-      const ampm = rawTime.match(/\s*(AM|PM)\s*$/i)?.[1]?.toUpperCase();
-      const clean = rawTime.replace(/\s*(AM|PM)\s*$/i, '');
-      const parts = clean.split(':').map(Number);
-      if (!Number.isFinite(parts[0])) return null;
-      hours = parts[0];
-      minutes = Number.isFinite(parts[1]) ? parts[1] : 0;
-
-      if (ampm) {
-        if (hours === 12) hours = 0;
-        if (ampm === 'PM') hours += 12;
-      }
-
-      const target = new Date(`${date}T00:00:00`);
-      if (Number.isNaN(target.getTime())) return null;
-      target.setHours(hours, minutes, 0, 0);
-      return target.getTime();
-    };
-
-    const scheduleTask = (task: Task) => {
-      if (!settings.notifications_enabled || !task.reminder_enabled || task.completed) return;
-
-      const taskTime = parseTaskDateTime(task);
-      if (taskTime === null) return;
-
-      const customAt = task.custom_reminder_at ? new Date(task.custom_reminder_at).getTime() : NaN;
-      const reminderAt = Number.isFinite(customAt)
-        ? customAt
-        : taskTime - Math.max(0, task.reminder_minutes || 0) * 60_000;
-
-      const delay = reminderAt - Date.now();
-      if (delay <= 0) return;
-
-      const fire = () => {
-        const latest = tasks.find(t => t.id === task.id);
-        if (!latest || latest.completed || !latest.reminder_enabled) return;
-        const mins = Math.max(0, latest.reminder_minutes || 0);
-        const timingText = mins === 0 ? 'starts now' : `starts in ${mins} minute${mins === 1 ? '' : 's'}`;
-        notificationService.triggerTaskReminder(latest, timingText);
-      };
-
-      const setChunk = (remaining: number) => {
-        const handle = setTimeout(() => {
-          if (remaining > MAX_TIMEOUT) {
-            setChunk(remaining - MAX_TIMEOUT);
-          } else {
-            fire();
-          }
-        }, Math.min(remaining, MAX_TIMEOUT));
-        timers.set(task.id, handle);
-      };
-
-      setChunk(delay);
-    };
-
-    tasks.forEach(scheduleTask);
-
-    return () => {
-      timers.forEach(timer => clearTimeout(timer));
-    };
-  }, [tasks, settings.notifications_enabled]);
 
   // Splash auto-advance
   useEffect(() => {
@@ -468,7 +394,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const nowIso = new Date().toISOString();
 
     const taskDate = taskData.task_date || taskData.date || activeDate;
-    const taskTime = taskData.task_time || taskData.time || '10:00:00';
+    const taskTime = normalizeTaskTime(taskData.task_time || taskData.time || '10:00:00');
+    if (!taskData.title.trim()) throw new Error('A task title is required.');
+    if (!isValidTaskDate(taskDate)) throw new Error('Choose a valid task date.');
+    if (!/^\d{2}:\d{2}:\d{2}$/.test(taskTime)) {
+      throw new Error('Choose a valid task time.');
+    }
 
     // Use a UUID client-side so the same ID is used by the optimistic UI,
     // Supabase row, and Realtime INSERT event. This prevents duplicate tasks.
@@ -497,10 +428,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setTasks(prev => [...prev, newTask]);
-    showToast('Task added successfully!', 'success');
-    soundService.playTap();
 
-    // Supabase push
     const supabase = getSupabase();
     if (supabase && user && isSupabaseConfigured()) {
       try {
@@ -521,26 +449,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             notes: newTask.notes,
           },
         ]);
-        if (error) console.error('Supabase task insert error:', error.message);
+        if (error) throw error;
       } catch (e) {
-        console.error('Supabase task insert failed:', e);
+        setTasks(prev => prev.filter(task => task.id !== newTask.id));
+        const message = e instanceof Error ? e.message : 'Task could not be saved to Supabase.';
+        throw new Error(message);
       }
     }
 
+    showToast('Task saved successfully.', 'success');
+    soundService.playTap();
     return newTask;
   };
 
   const updateTask = async (id: string, updates: Partial<Task>) => {
     const updatedAt = new Date().toISOString();
+    const original = tasks.find(task => task.id === id);
+    const taskDate = updates.task_date || updates.date;
+    const taskTime = updates.task_time || updates.time;
+    const normalizedTime = taskTime ? normalizeTaskTime(taskTime) : undefined;
+    if (updates.title !== undefined && !updates.title.trim()) {
+      showToast('A task title is required.', 'error');
+      return;
+    }
+    if (taskDate && !isValidTaskDate(taskDate)) {
+      showToast('Choose a valid task date.', 'error');
+      return;
+    }
+    if (normalizedTime && !/^\d{2}:\d{2}:\d{2}$/.test(normalizedTime)) {
+      showToast('Enter a valid task time.', 'error');
+      return;
+    }
 
     setTasks(prev =>
       prev.map(t => {
         if (t.id !== id) return t;
         const normalized = { ...t, ...updates, updated_at: updatedAt };
-        if (updates.task_date) normalized.date = updates.task_date;
-        if (updates.date) normalized.task_date = updates.date;
-        if (updates.task_time) normalized.time = updates.task_time.substring(0, 5);
-        if (updates.time) normalized.task_time = updates.time;
+        if (taskDate) {
+          normalized.date = taskDate;
+          normalized.task_date = taskDate;
+        }
+        if (normalizedTime) {
+          normalized.time = normalizedTime.substring(0, 5);
+          normalized.task_time = normalizedTime;
+        }
         return normalized;
       })
     );
@@ -552,25 +504,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         delete payload.date;
         delete payload.time;
         delete payload.reminder_type;
-        await supabase.from('tasks').update(payload).eq('id', id).eq('user_id', user.id);
+        if (taskDate) payload.task_date = taskDate;
+        if (normalizedTime) payload.task_time = normalizedTime;
+        if (updates.reminder_type) {
+          const reminderMinutes: Record<string, number> = {
+            none: 0, at_time: 0, '5_min': 5, '10_min': 10, '15_min': 15, '30_min': 30, '1_hour': 60, custom: 10,
+          };
+          payload.reminder_enabled = updates.reminder_type !== 'none';
+          payload.reminder_minutes = reminderMinutes[updates.reminder_type];
+        }
+        const { error } = await supabase.from('tasks').update(payload).eq('id', id).eq('user_id', user.id);
+        if (error) throw error;
       } catch (e) {
-        console.error('Supabase task update error:', e);
+        if (original) setTasks(prev => prev.map(task => task.id === id ? original : task));
+        const message = e instanceof Error ? e.message : 'Task update failed.';
+        console.error('Supabase task update error:', message);
+        showToast(`Task update failed: ${message}`, 'error');
       }
     }
   };
 
   const deleteTask = async (id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
-    showToast('Task deleted', 'info');
-
     const supabase = getSupabase();
     if (supabase && user && isSupabaseConfigured()) {
       try {
-        await supabase.from('tasks').delete().eq('id', id).eq('user_id', user.id);
+        const { error } = await supabase.from('tasks').delete().eq('id', id).eq('user_id', user.id);
+        if (error) throw error;
       } catch (e) {
-        console.error('Supabase task delete error:', e);
+        const message = e instanceof Error ? e.message : 'Task deletion failed.';
+        console.error('Supabase task delete error:', message);
+        showToast(`Task deletion failed: ${message}`, 'error');
+        return;
       }
     }
+    setTasks(prev => prev.filter(t => t.id !== id));
+    showToast('Task deleted.', 'success');
   };
 
   const toggleTaskCompletion = async (id: string) => {
@@ -598,9 +566,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     type: '30_min' | '1_hour' | 'tomorrow' | 'custom', 
     customTime?: string
   ) => {
-    const nextDate = new Date(activeDate);
-    nextDate.setDate(nextDate.getDate() + 1);
-    const tomorrowStr = nextDate.toISOString().split('T')[0];
+    const tomorrowStr = addDays(activeDate, 1);
 
     for (const id of taskIds) {
       if (type === 'tomorrow') {
@@ -610,7 +576,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else {
         const task = tasks.find(t => t.id === id);
         const mins = type === '30_min' ? 30 : 60;
-        await updateTask(id, { notes: (task?.notes ? task.notes + '\n' : '') + `[Rescheduled +${mins}m]` });
+        if (task) {
+          const date = task.task_date || task.date || activeDate;
+          const time = normalizeTaskTime(task.task_time || task.time || '09:00');
+          const [year, month, day] = date.split('-').map(Number);
+          const [hours, minutes] = time.split(':').map(Number);
+          const shifted = new Date(Date.UTC(year, month - 1, day, hours, minutes + mins));
+          const shiftedDate = `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`;
+          const shiftedTime = `${String(shifted.getUTCHours()).padStart(2, '0')}:${String(shifted.getUTCMinutes()).padStart(2, '0')}`;
+          await updateTask(id, { task_date: shiftedDate, date: shiftedDate, task_time: `${shiftedTime}:00`, time: shiftedTime });
+        }
       }
     }
 
@@ -621,21 +596,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Settings & Push Notifications
   // ============================================================================
   const updateSettings = async (updates: Partial<UserSettings>) => {
-    setSettings(prev => ({ ...prev, ...updates }));
-    showToast('Settings saved', 'success');
-
     const supabase = getSupabase();
     if (supabase && user && isSupabaseConfigured()) {
       try {
-        await supabase.from('user_settings').upsert({
+        const { error } = await supabase.from('user_settings').upsert({
           user_id: user.id,
           ...updates,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
+        if (error) throw error;
       } catch (e) {
-        console.error('Supabase settings update error:', e);
+        const message = e instanceof Error ? e.message : 'Settings could not be saved.';
+        console.error('Supabase settings update error:', message);
+        showToast(`Settings could not be saved: ${message}`, 'error');
+        return;
       }
     }
+    setSettings(prev => ({ ...prev, ...updates }));
+    if (updates.timezone) setActiveDate(getDateInTimeZone(updates.timezone));
+    showToast('Settings saved.', 'success');
   };
 
   // Real push subscription flow
@@ -669,9 +648,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const result = await sendPushViaEdgeFunction(user.id, {
       title: 'MyPlan 🔔',
-      body: 'Notifications are working! Real push delivered successfully to your device.',
+      body: 'This is a delivery test from your MyPlan account.',
       notification_type: 'test',
-      data: { url: '/', type: 'test' },
+      data: { type: 'test' },
     });
 
     if (result.success) {
@@ -864,7 +843,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const getTodayStats = () => {
-    const todayTasks = tasks.filter(t => (t.task_date || t.date) === activeDate);
+    const today = getDateInTimeZone(settings.timezone || 'Asia/Kolkata');
+    const todayTasks = tasks.filter(t => (t.task_date || t.date) === today);
     const total = todayTasks.length;
     const completed = todayTasks.filter(t => t.completed).length;
     const pending = total - completed;
@@ -873,15 +853,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const getWeeklyStats = () => {
-    const completedThisWeek = tasks.filter(t => t.completed).length;
-    const total = tasks.length;
+    const today = getDateInTimeZone(settings.timezone || 'Asia/Kolkata');
+    const todayDate = new Date(`${today}T12:00:00`);
+    const daysSinceMonday = (todayDate.getDay() + 6) % 7;
+    const weekStart = addDays(today, -daysSinceMonday);
+    const weekTasks = tasks.filter(task => {
+      const date = task.task_date || task.date || '';
+      return date >= weekStart && date <= today;
+    });
+    const completedThisWeek = weekTasks.filter(task => task.completed).length;
+    const total = weekTasks.length;
     const completionRate = total > 0 ? Math.round((completedThisWeek / total) * 100) : 0;
 
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const dayCounts = days.map((day, i) => ({
-      day,
-      count: Math.max(1, ((i * 3 + 2) % 6) + (i === 3 ? 4 : 0)),
-    }));
+    const dayCounts = Array.from({ length: daysSinceMonday + 1 }, (_, index) => {
+      const date = addDays(weekStart, index);
+      const [year, month, day] = date.split('-').map(Number);
+      const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' })
+        .format(new Date(Date.UTC(year, month - 1, day)));
+      return { day: weekday, count: weekTasks.filter(task => task.completed && (task.task_date || task.date) === date).length };
+    });
 
     return { completedThisWeek, completionRate, dayCounts };
   };

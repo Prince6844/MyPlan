@@ -1,32 +1,22 @@
 import React, { useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
+import { addDays } from '../../lib/dates';
 
 export const DateSelector: React.FC = () => {
   const { activeDate, setActiveDate } = useApp();
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Generate range centered around current active date (or around Oct 2, 2026 reference)
-  // Let's create a range of ~14 days (7 before, 7 after)
   const dates = React.useMemo(() => {
     const list: { fullDate: string; dayName: string; dayNum: number }[] = [];
-    const base = new Date('2026-10-02T12:00:00'); // match reference base date
-
     for (let i = -4; i <= 6; i++) {
-      const d = new Date(base);
-      d.setDate(base.getDate() + i);
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      const fullDate = `${year}-${month}-${day}`;
-
-      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      const dayName = dayNames[d.getDay()];
-      const dayNum = d.getDate();
-
-      list.push({ fullDate, dayName, dayNum });
+      const fullDate = addDays(activeDate, i);
+      const [year, month, day] = fullDate.split('-').map(Number);
+      const d = new Date(Date.UTC(year, month - 1, day));
+      const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(d);
+      list.push({ fullDate, dayName, dayNum: day });
     }
     return list;
-  }, []);
+  }, [activeDate]);
 
   // Auto scroll active date into view
   useEffect(() => {

@@ -12,9 +12,20 @@ import {
   Edit3,
   AlertTriangle
 } from 'lucide-react';
-import { TopBar } from '../common/TopBar';
 import { useApp } from '../../context/AppContext';
 import type { ReminderType, RepeatType, Task, Category } from '../../types';
+import { formatTaskTime, isValidTaskDate, normalizeTaskTime } from '../../lib/dates';
+
+const reminderTypeForTask = (task?: Task): ReminderType => {
+  if (!task) return '10_min';
+  if (task.reminder_type) return task.reminder_type;
+  if (task.custom_reminder_at) return 'custom';
+  if (!task.reminder_enabled) return 'none';
+  const byMinutes: Record<number, ReminderType> = {
+    0: 'at_time', 5: '5_min', 10: '10_min', 15: '15_min', 30: '30_min', 60: '1_hour',
+  };
+  return byMinutes[task.reminder_minutes] || '10_min';
+};
 
 export const TaskDetailsModal: React.FC = () => {
   const { 
@@ -25,7 +36,8 @@ export const TaskDetailsModal: React.FC = () => {
     toggleTaskCompletion, 
     deleteTask, 
     updateTask,
-    testTaskReminder
+    testTaskReminder,
+    showToast,
   } = useApp();
 
   const task = tasks.find((t: Task) => t.id === selectedTaskId);
@@ -33,12 +45,20 @@ export const TaskDetailsModal: React.FC = () => {
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(task?.title || '');
+  const [editDescription, setEditDescription] = useState(task?.description || '');
   const [editDate, setEditDate] = useState(task?.date || task?.task_date || '');
-  const [editTime, setEditTime] = useState(task?.time || task?.task_time.substring(0, 5) || '');
+  const [editTime, setEditTime] = useState(task ? formatTaskTime(task.time || task.task_time) : '');
   const [editCategory, setEditCategory] = useState(task?.category || 'Study');
   const [editNotes, setEditNotes] = useState(task?.notes || '');
-  const [editReminder, setEditReminder] = useState<ReminderType>(task?.reminder_type || '10_min');
+  const [editReminder, setEditReminder] = useState<ReminderType>(() => reminderTypeForTask(task));
   const [editRepeat, setEditRepeat] = useState<RepeatType>(task?.repeat_type ?? 'none');
+  const [editCustomReminderAt, setEditCustomReminderAt] = useState(() => {
+    if (!task?.custom_reminder_at) return '';
+    const date = new Date(task.custom_reminder_at);
+    return Number.isNaN(date.getTime())
+      ? ''
+      : new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  });
 
   // Delete confirmation state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -96,25 +116,26 @@ export const TaskDetailsModal: React.FC = () => {
     return map[type] || 'Does not repeat';
   };
 
-  const taskReminderType: ReminderType = task.reminder_type ?? (
-    !task.reminder_enabled ? 'none' : ({
-      0: 'at_time',
-      5: '5_min',
-      10: '10_min',
-      15: '15_min',
-      30: '30_min',
-      60: '1_hour',
-    } satisfies Record<number, ReminderType>)[task.reminder_minutes] || '10_min'
-  );
+  const taskReminderType = reminderTypeForTask(task);
 
   const handleSaveEdit = async () => {
+    if (!editTitle.trim() || !isValidTaskDate(editDate) || !/^\d{2}:\d{2}:\d{2}$/.test(normalizeTaskTime(editTime))) {
+      showToast('Enter a title, valid date, and valid time before saving.', 'error');
+      return;
+    }
+    if (editReminder === 'custom' && !editCustomReminderAt) {
+      showToast('Choose a custom reminder date and time.', 'error');
+      return;
+    }
     await updateTask(task.id, {
       title: editTitle.trim(),
+      description: editDescription.trim(),
       date: editDate,
       time: editTime,
       category: editCategory,
       notes: editNotes.trim(),
       reminder_type: editReminder,
+      custom_reminder_at: editReminder === 'custom' ? new Date(editCustomReminderAt).toISOString() : null,
       repeat_type: editRepeat,
     });
     setIsEditing(false);
@@ -126,9 +147,7 @@ export const TaskDetailsModal: React.FC = () => {
   };
 
   return (
-    <div className="relative w-full h-full min-h-[640px] flex flex-col justify-between bg-[#F8FAFC] dark:bg-slate-900 text-slate-800 dark:text-slate-100 animate-slide-up select-none overflow-hidden">
-      <TopBar />
-
+    <div className="relative mx-auto max-h-[calc(100vh-110px)] max-w-3xl overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-800 shadow-sm animate-slide-up">
       {/* Header */}
       <div className="w-full flex items-center justify-between px-4 py-2 border-b border-slate-100 dark:border-slate-800">
         <button
@@ -169,6 +188,7 @@ export const TaskDetailsModal: React.FC = () => {
                 <h3 className={`text-lg font-bold truncate ${task.completed ? 'line-through text-slate-400' : 'text-slate-900 dark:text-white'}`}>
                   {task.title}
                 </h3>
+                {task.description && <p className="mt-1 text-sm text-slate-500">{task.description}</p>}
                 <span
                   className="inline-block mt-1 px-3 py-1 rounded-full text-xs font-bold"
                   style={{ backgroundColor: categoryObj.bgColor, color: categoryObj.color }}
@@ -261,6 +281,15 @@ export const TaskDetailsModal: React.FC = () => {
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold"
               />
             </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Description</label>
+              <textarea
+                value={editDescription}
+                onChange={event => setEditDescription(event.target.value)}
+                rows={3}
+                className="w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Date</label>
@@ -274,7 +303,7 @@ export const TaskDetailsModal: React.FC = () => {
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Time</label>
                 <input
-                  type="text"
+                  type="time"
                   value={editTime}
                   onChange={e => setEditTime(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold"
@@ -313,8 +342,20 @@ export const TaskDetailsModal: React.FC = () => {
                   <option value="15_min">15 min before</option>
                   <option value="30_min">30 min before</option>
                   <option value="1_hour">1 hour before</option>
+                  <option value="custom">Custom date and time</option>
                 </select>
               </div>
+              {editReminder === 'custom' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Custom reminder</label>
+                  <input
+                    type="datetime-local"
+                    value={editCustomReminderAt}
+                    onChange={event => setEditCustomReminderAt(event.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Repeat</label>
                 <select

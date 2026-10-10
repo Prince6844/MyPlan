@@ -2,7 +2,7 @@
 // MyPlan Service Worker — Real Web Push & Notification Click Navigation
 // ============================================================================
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
@@ -12,12 +12,13 @@ self.addEventListener('activate', (event) => {
 
 // Real Web Push Event Handler
 self.addEventListener('push', (event) => {
+  const baseUrl = self.registration.scope;
   let data = {
     title: 'MyPlan 🔔',
     body: 'You have a new update.',
-    icon: '/favicon.svg',
-    badge: '/favicon.svg',
-    data: { url: '/', type: 'general' },
+    icon: new URL('favicon.svg', baseUrl).href,
+    badge: new URL('favicon.svg', baseUrl).href,
+    data: { url: baseUrl, type: 'general' },
   };
 
   if (event.data) {
@@ -26,9 +27,9 @@ self.addEventListener('push', (event) => {
       data = {
         title: payload.title || data.title,
         body: payload.body || data.body,
-        icon: payload.icon || '/favicon.svg',
-        badge: payload.badge || '/favicon.svg',
-        data: payload.data || { url: '/', type: payload.type || 'general' },
+        icon: new URL('favicon.svg', baseUrl).href,
+        badge: new URL('favicon.svg', baseUrl).href,
+        data: payload.data || { url: baseUrl, type: payload.type || 'general' },
         tag: payload.tag || payload.type || 'myplan-notification',
       };
     } catch {
@@ -60,16 +61,21 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
   const notifData = event.notification.data || {};
-  let targetUrl = '/';
+  const baseUrl = self.registration.scope;
+  let targetUrl = baseUrl;
 
   if (notifData.type === 'morning_summary') {
-    targetUrl = '/?screen=home&action=morning_summary';
+    targetUrl = `${baseUrl}?screen=home&action=morning_summary`;
   } else if (notifData.type === 'night_review') {
-    targetUrl = '/?screen=night_review';
+    targetUrl = `${baseUrl}?screen=night_review`;
   } else if (notifData.type === 'task_reminder' && notifData.taskId) {
-    targetUrl = `/?screen=task_details&taskId=${notifData.taskId}`;
+    targetUrl = `${baseUrl}?screen=task_details&taskId=${encodeURIComponent(notifData.taskId)}`;
   } else if (notifData.url) {
-    targetUrl = notifData.url;
+    const candidate = new URL(notifData.url, baseUrl);
+    const scope = new URL(baseUrl);
+    if (candidate.origin === scope.origin && candidate.pathname.startsWith(scope.pathname)) {
+      targetUrl = candidate.href;
+    }
   }
 
   event.waitUntil(

@@ -1,167 +1,159 @@
-import React, { useState } from 'react';
-import { Plus, Bell, Moon, Sun, Smartphone } from 'lucide-react';
-import { TopBar } from '../common/TopBar';
-import { DateSelector } from '../tasks/DateSelector';
-import { TaskList } from '../tasks/TaskList';
-import { BottomNavigation } from '../layout/BottomNavigation';
+import React, { useMemo, useState } from 'react';
+import { ArrowRight, CalendarDays, CheckCircle2, Clock3, Plus, Settings2, TrendingUp } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { getDateInTimeZone } from '../../lib/dates';
+import { useCurrentTime } from '../../lib/useCurrentTime';
+import type { Task } from '../../types';
+import { TaskCard } from '../tasks/TaskCard';
 import { AuthModal } from './AuthModal';
 
-export const HomeScreen: React.FC = () => {
-  const { 
-    user, 
-    activeDate, 
-    tasks, 
-    setActiveScreen, 
-    testMorningNotification, 
-    testNightNotification 
-  } = useApp();
+type HomeView = 'dashboard' | 'tasks' | 'completed';
 
+interface HomeScreenProps {
+  view?: HomeView;
+}
+
+const compareTaskTime = (first: Task, second: Task) =>
+  (first.task_date || first.date || '').localeCompare(second.task_date || second.date || '') ||
+  (first.task_time || first.time || '').localeCompare(second.task_time || second.time || '');
+
+export const HomeScreen: React.FC<HomeScreenProps> = ({ view = 'dashboard' }) => {
+  const { user, tasks, settings, setActiveScreen, setActiveDate, isSyncing, isSupabaseLive } = useApp();
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const now = useCurrentTime();
+  const nowDate = new Date(now);
+  const today = getDateInTimeZone(settings.timezone || 'Asia/Kolkata', nowDate);
+  const timeNow = new Intl.DateTimeFormat('en-GB', {
+    timeZone: settings.timezone || 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(nowDate);
+  const ordered = useMemo(() => [...tasks].sort(compareTaskTime), [tasks]);
+  const todayTasks = ordered.filter(task => (task.task_date || task.date) === today);
+  const upcomingTasks = ordered.filter(task => !task.completed && (
+    (task.task_date || task.date || '') > today ||
+    ((task.task_date || task.date) === today && (task.task_time || task.time || '').slice(0, 5) >= timeNow)
+  )).slice(0, 5);
+  const overdueTasks = ordered.filter(task => !task.completed && (
+    (task.task_date || task.date || '') < today ||
+    ((task.task_date || task.date) === today && (task.task_time || task.time || '').slice(0, 5) < timeNow)
+  ));
+  const completedTasks = ordered.filter(task => task.completed);
+  const pendingTasks = ordered.filter(task => !task.completed);
+  const title = view === 'tasks' ? 'My Tasks' : view === 'completed' ? 'Completed tasks' : 'Good day';
+  const subtitle = new Intl.DateTimeFormat('en-IN', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: settings.timezone || 'Asia/Kolkata',
+  }).format(nowDate);
 
-  // Format date display
-  const formatDateTitle = (dateStr: string) => {
-    try {
-      const [year, month, day] = dateStr.split('-').map(Number);
-      const d = new Date(year, month - 1, day);
-      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      return `${dayNames[d.getDay()]}, ${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`;
-    } catch {
-      return dateStr;
-    }
+  const openAddTask = () => {
+    setActiveDate(today);
+    setActiveScreen('add_task');
   };
 
-  // Filter tasks for active date
-  const dateTasks = tasks.filter(t => t.date === activeDate);
-  const completedCount = dateTasks.filter(t => t.completed).length;
-  const totalCount = dateTasks.length;
-  const progressPercent = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+  if (view !== 'dashboard') {
+    const list = view === 'completed' ? completedTasks : pendingTasks;
+    return (
+      <section className="space-y-6">
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-slate-500">{view === 'completed' ? 'Your accomplishments' : 'All your open work'}</p>
+            <h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">{title}</h2>
+          </div>
+          <button onClick={openAddTask} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><Plus size={17} /> Add task</button>
+        </header>
+        <div className="rounded-xl border border-slate-200 bg-white p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="font-semibold text-slate-900">{list.length} {view === 'completed' ? 'completed' : 'open'} {list.length === 1 ? 'task' : 'tasks'}</h3>
+            {isSyncing && <span className="text-xs text-slate-500">Syncing with your account…</span>}
+          </div>
+          {list.length ? <div className="space-y-2">{list.map(task => <TaskCard key={task.id} task={task} />)}</div> : (
+            <div className="rounded-lg border border-dashed border-slate-200 px-6 py-12 text-center">
+              <CheckCircle2 className="mx-auto mb-3 text-slate-300" size={28} />
+              <p className="font-medium text-slate-700">{view === 'completed' ? 'Nothing completed yet' : 'You’re all caught up'}</p>
+              <p className="mt-1 text-sm text-slate-500">{view === 'completed' ? 'Completed tasks will appear here.' : 'Create a task to start planning your work.'}</p>
+              {view === 'tasks' && <button onClick={openAddTask} className="mt-4 text-sm font-semibold text-blue-600 hover:text-blue-700">Create a task</button>}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  const summaries = [
+    { label: "Today's tasks", value: todayTasks.length, detail: `${todayTasks.filter(task => task.completed).length} completed`, icon: CalendarDays, screen: 'calendar' as const, color: 'blue' },
+    { label: 'Upcoming', value: upcomingTasks.length, detail: 'Scheduled ahead', icon: Clock3, screen: 'tasks' as const, color: 'violet' },
+    { label: 'Overdue', value: overdueTasks.length, detail: 'Need your attention', icon: TrendingUp, screen: 'tasks' as const, color: 'rose' },
+    { label: 'Completed', value: completedTasks.length, detail: 'Tasks finished', icon: CheckCircle2, screen: 'completed' as const, color: 'emerald' },
+  ];
 
   return (
-    <div className="relative w-full h-full min-h-[640px] flex flex-col justify-between bg-[#F8FAFC] dark:bg-slate-900 text-slate-800 dark:text-slate-100 animate-fade-in overflow-hidden">
-      {/* Top Status Bar */}
-      <TopBar />
-
-      {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto px-5 pt-2 pb-6 space-y-4 no-scrollbar">
-        {/* User Header */}
-        <div className="flex items-center justify-between pt-1">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white flex items-center">
-              Good Morning, {user?.name || 'Prince'} <span className="ml-1.5 inline-block">👋</span>
-            </h1>
-            <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 mt-0.5">
-              {formatDateTitle(activeDate)}
-            </p>
-          </div>
-
-          {/* User Avatar with Profile/Sync trigger */}
-          <button
-            onClick={() => setShowAuthModal(true)}
-            className="relative w-11 h-11 rounded-full overflow-hidden ring-2 ring-brand-500/20 shadow-sm hover:scale-105 active:scale-95 transition-transform"
-            title="Profile & Sync Settings"
-          >
-            <img
-              src={user?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
-              alt={user?.name || 'User'}
-              className="w-full h-full object-cover"
-            />
-            {/* Online indicator */}
-            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
-          </button>
+    <section className="space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{subtitle}</p>
+          <h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">{title}{user?.name ? `, ${user.name.split(' ')[0]}` : ''}</h2>
+          <p className="mt-1 text-sm text-slate-500">Here’s what’s on your schedule today.</p>
         </div>
-
-        {/* Quick Simulation Bar (Convenient testing for Morning/Night triggers) */}
-        <div className="flex items-center justify-between bg-blue-50/70 dark:bg-slate-800/60 p-2 px-3 rounded-xl border border-blue-100/80 dark:border-slate-700/60 text-[11px]">
-          <span className="font-semibold text-brand-600 dark:text-brand-400 flex items-center space-x-1">
-            <Bell size={12} />
-            <span>Test Alerts:</span>
-          </span>
-          <div className="flex items-center space-x-1.5">
-            <button
-              onClick={testMorningNotification}
-              className="px-2 py-1 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:text-brand-500 font-medium shadow-2xs flex items-center space-x-1"
-              title="Test 7:00 AM Morning Summary"
-            >
-              <Sun size={11} className="text-amber-500" />
-              <span>7 AM</span>
-            </button>
-            <button
-              onClick={testNightNotification}
-              className="px-2 py-1 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:text-brand-500 font-medium shadow-2xs flex items-center space-x-1"
-              title="Test 9:30 PM Night Review"
-            >
-              <Moon size={11} className="text-indigo-400" />
-              <span>9:30 PM</span>
-            </button>
-            <button
-              onClick={() => setActiveScreen('simulator')}
-              className="px-2 py-1 rounded-lg bg-brand-500 text-white font-medium hover:bg-brand-600 shadow-2xs flex items-center space-x-1"
-              title="Lock Screen Simulator (Screens 10 & 11)"
-            >
-              <Smartphone size={11} />
-              <span>Lock Screen</span>
-            </button>
-          </div>
+        <div className="flex items-center gap-2">
+          {!user && <button onClick={() => setShowAuthModal(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Sign in / sync</button>}
+          <button onClick={() => setActiveScreen('settings')} className="rounded-lg border border-slate-200 bg-white p-2.5 text-slate-500 hover:bg-slate-50" aria-label="Open settings"><Settings2 size={17} /></button>
+          <button onClick={openAddTask} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><Plus size={17} /> New task</button>
         </div>
+      </header>
 
-        {/* Horizontal Date Picker */}
-        <div className="pt-1">
-          <DateSelector />
+      {!user && (
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          {isSupabaseLive
+            ? 'You’re viewing a local workspace. Sign in to sync tasks securely to your Supabase account.'
+            : 'Demo workspace — sample tasks are stored locally and are not mixed with signed-in Supabase data.'}
         </div>
+      )}
+      {isSyncing && <div role="status" className="text-sm text-slate-500">Syncing your tasks…</div>}
 
-        {/* Today's Tasks Section Header */}
-        <div className="pt-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
-                Today's Tasks
-              </h2>
-              <span className="text-xs text-slate-400 font-medium">
-                {totalCount} {totalCount === 1 ? 'task' : 'tasks'}
-              </span>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {summaries.map(({ label, value, detail, icon: Icon, screen, color }) => (
+          <button key={label} onClick={() => setActiveScreen(screen)} className="group rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-blue-200 hover:shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-500">{label}</span>
+              <span className={`rounded-lg p-2 ${color === 'blue' ? 'bg-blue-50 text-blue-600' : color === 'violet' ? 'bg-violet-50 text-violet-600' : color === 'rose' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}><Icon size={17} /></span>
             </div>
-
-            {/* Progress indicator */}
-            <div className="flex flex-col items-end">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                {completedCount}/{totalCount}
-              </span>
-              <div className="w-16 sm:w-20 h-2 bg-slate-200 dark:bg-slate-700 rounded-full mt-1 overflow-hidden">
-                <div
-                  className="h-full bg-brand-500 rounded-full transition-all duration-300"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Task List */}
-          <div className="mt-3">
-            <TaskList tasks={dateTasks} />
-          </div>
-        </div>
-
-        {/* + Add Task Button matching Screen 3 */}
-        <div className="pt-2 pb-1">
-          <button
-            onClick={() => setActiveScreen('add_task')}
-            className="w-full py-3.5 px-4 rounded-2xl bg-brand-500 hover:bg-brand-600 active:scale-[0.98] text-white font-bold text-sm shadow-float flex items-center justify-center space-x-2 transition-all"
-          >
-            <Plus size={18} className="stroke-[2.5]" />
-            <span>Add Task</span>
+            <div className="mt-3 flex items-baseline gap-2"><span className="text-2xl font-bold text-slate-900">{value}</span><span className="text-xs text-slate-500">{detail}</span></div>
           </button>
-        </div>
+        ))}
       </div>
 
-      {/* Bottom Navigation */}
-      <BottomNavigation />
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]">
+        <section className="rounded-xl border border-slate-200 bg-white p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div><h3 className="font-semibold text-slate-900">Today’s schedule</h3><p className="mt-0.5 text-xs text-slate-500">{todayTasks.length} tasks planned</p></div>
+            <button onClick={() => setActiveScreen('calendar')} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700">Open calendar <ArrowRight size={15} /></button>
+          </div>
+          {todayTasks.length ? <div className="space-y-2">{todayTasks.map(task => <TaskCard key={task.id} task={task} />)}</div> : (
+            <div className="rounded-lg border border-dashed border-slate-200 px-5 py-10 text-center">
+              <CalendarDays className="mx-auto mb-3 text-slate-300" size={26} />
+              <p className="font-medium text-slate-700">Nothing planned for today</p>
+              <p className="mt-1 text-sm text-slate-500">Add a task to make a little progress.</p>
+              <button onClick={openAddTask} className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-blue-600"><Plus size={15} /> Add a task</button>
+            </div>
+          )}
+        </section>
 
-      {/* Auth & Supabase config modal */}
-      {showAuthModal && (
-        <AuthModal onClose={() => setShowAuthModal(false)} />
-      )}
-    </div>
+        <div className="space-y-5">
+          <section className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <div><h3 className="font-semibold text-slate-900">Upcoming</h3><p className="mt-0.5 text-xs text-slate-500">Coming up next</p></div>
+              <button onClick={() => setActiveScreen('tasks')} className="text-xs font-medium text-blue-600 hover:text-blue-700">See all</button>
+            </div>
+            {upcomingTasks.length ? <div className="space-y-2">{upcomingTasks.map(task => <TaskCard key={task.id} task={task} />)}</div> : <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-500">No upcoming reminders. Your schedule is clear.</p>}
+          </section>
+          <section className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <div><h3 className="font-semibold text-slate-900">Overdue</h3><p className="mt-0.5 text-xs text-slate-500">Unfinished tasks past their time</p></div>
+              <span className="rounded-full bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-600">{overdueTasks.length}</span>
+            </div>
+            {overdueTasks.length ? <div className="space-y-2">{overdueTasks.slice(0, 4).map(task => <TaskCard key={task.id} task={task} />)}</div> : <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-500">You’re all caught up. Nice work.</p>}
+          </section>
+        </div>
+      </div>
+      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} />}
+    </section>
   );
 };

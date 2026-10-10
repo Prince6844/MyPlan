@@ -4,6 +4,9 @@
 
 @layer base {
   body {
+    min-width: 320px;
+    min-height: 100vh;
+    background: #f7f9fc;
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     -webkit-tap-highlight-color: transparent;
   }
