@@ -26,7 +26,7 @@ Set the GitHub Actions repository secret `VITE_VAPID_PUBLIC_KEY` to the exact pu
 
 ## Notifications and timezone behavior
 
-Users must sign in, select **Enable Notifications**, and grant browser permission. The subscription is upserted for the authenticated user under the existing RLS policies. Settings store an IANA timezone (default `Asia/Kolkata`); the server evaluates each user's summary/review time and task wall-clock dates in that timezone. Delivery claims are unique per user and scheduled occurrence. Failed sends can retry; successful claims are not sent again. Invalid (404/410) endpoints are removed.
+Users must sign in, select **Enable Notifications**, and grant browser permission. The subscription is upserted for the authenticated user under the existing RLS policies. Settings store an IANA timezone (default `Asia/Kolkata`); the server evaluates each user's summary/review time and task wall-clock dates in that timezone. Task reminders use the selected lead time and can catch up for 15 minutes if a scheduled invocation is late. Delivery claims are unique per user and scheduled occurrence. Failed sends can retry; successful claims are not sent again. Invalid (404/410) endpoints are removed.
 
 ## Verify end-to-end delivery
 

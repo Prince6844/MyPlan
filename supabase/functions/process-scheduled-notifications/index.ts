@@ -5,6 +5,7 @@ import webpush from "npm:web-push@3.6.7";
 const responseHeaders = { "Content-Type": "application/json" };
 const minute = 60_000;
 const deliveryWindow = 2 * minute;
+const taskReminderCatchUpWindow = 15 * minute;
 type NotificationType = "morning_summary" | "night_review" | "task_reminder";
 type TaskRecord = {
   id: string;
@@ -222,7 +223,7 @@ serve(async req => {
         .from("tasks").select("id, title, task_date, task_time, completed, reminder_enabled, reminder_minutes, custom_reminder_at")
         .eq("user_id", settings.user_id).eq("completed", false).eq("reminder_enabled", true)
         .not("custom_reminder_at", "is", null)
-        .gte("custom_reminder_at", new Date(now.getTime() - deliveryWindow).toISOString())
+        .gte("custom_reminder_at", new Date(now.getTime() - taskReminderCatchUpWindow).toISOString())
         .lte("custom_reminder_at", now.toISOString());
       if (customTaskError) throw customTaskError;
 
@@ -237,7 +238,7 @@ serve(async req => {
         const reminderEpoch = task.custom_reminder_at
           ? new Date(task.custom_reminder_at).getTime()
           : taskEpoch - Math.max(0, task.reminder_minutes ?? 10) * minute;
-        if (!Number.isFinite(reminderEpoch) || reminderEpoch > now.getTime() || now.getTime() - reminderEpoch > deliveryWindow) continue;
+        if (!Number.isFinite(reminderEpoch) || reminderEpoch > now.getTime() || now.getTime() - reminderEpoch > taskReminderCatchUpWindow) continue;
 
         const key = `task:${task.id}:${new Date(reminderEpoch).toISOString()}`;
         const taskLabel = timeLabel(taskEpoch, timeZone);
